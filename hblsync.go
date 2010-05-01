@@ -33,20 +33,69 @@ func openDirectoryOrDie(which string, dirName string) *os.File {
 	return file
 }
 
+type SyncStats struct {
+	ErrorCount int
+	DirsCreated int
+	DirsDeleted int
+	DirsGood int
+	FilesCreated int
+	FilesReplaced int
+	FilesDeleted int
+	FilesGood int
+}
+
+func readDirnames(dir *os.File, outNames *[]string, ok chan bool) {
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading dirnames: %v\n", err)
+		ok <- false
+	} else {
+		*outNames = names
+		ok <- true
+	}
+}
+
+func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
+	stats := new(SyncStats)
+	var srcDirnames []string
+	var dstDirnames []string
+	srcReadOp := make(chan bool)
+	dstReadOp := make(chan bool)
+	go readDirnames(srcDir, &srcDirnames, srcReadOp)
+	go readDirnames(dstDir, &dstDirnames, dstReadOp)
+	if !<-srcReadOp {
+		stats.ErrorCount++
+		fmt.Fprintf(os.Stderr, "Error reading %v", srcDir)
+	}
+	if !<-dstReadOp {
+		stats.ErrorCount++
+		fmt.Fprintf(os.Stderr, "Error reading %v", dstDir)
+	}
+	if stats.ErrorCount != 0 {
+		out <- *stats
+		return
+	}
+
+	// TODO: sync contents
+	fmt.Println("src contents:", srcDirnames)
+	fmt.Println("dst contents:", dstDirnames)
+
+	out <- *stats
+}
+
 func main() {
 	flag.Parse()
 	if (flag.NArg() != 2) {
 		os.Stderr.WriteString("Usage: hblsync <src_dir> <dst_dir>\n")
 		os.Exit(1)
 	}
+	srcFile := openDirectoryOrDie("source", flag.Arg(0))
+	dstFile := openDirectoryOrDie("destination", flag.Arg(1))
 
-	srcArg := flag.Arg(0)
-	dstArg := flag.Arg(1)
+	ch := make(chan SyncStats)
+	go SyncDirectories(srcFile, dstFile, ch)
+	results := <-ch
 
-	srcFile := openDirectoryOrDie("source", srcArg)
-	dstFile := openDirectoryOrDie("destination", dstArg)
-
-	fmt.Printf("src: " + srcFile.Name() + "\n")
-	fmt.Printf("dst: " + dstFile.Name() + "\n")
+	fmt.Println("Results:", results)
 }
 
