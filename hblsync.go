@@ -10,9 +10,10 @@ package main
 
 import "container/vector"
 import "exp/iterable"
-import "fmt"
 import "flag"
+import "fmt"
 import "os"
+import "syscall"
 
 var delete *bool = flag.Bool("delete", false, "delete mode (takes 1 argument)")
 
@@ -189,6 +190,32 @@ func copyRegularFile(srcName string, stat *os.FileInfo, dstName string,
 			bytesRemain -= int64(outN)
 		}
 	}
+
+	// Close it explicitly before we syscall.Utime() it, even
+	// though the precautionary defer'd Close() above will close
+	// it again later.  That's harmless.
+	err = outfd.Close()
+	if err != nil {
+		stats.ErrorCount++
+		return
+	}
+
+	// TODO: how to do this in a portable way?  Timeval.Sec and
+	// Usec are int64 on amd64.  Currently this only compiles in
+	// 386.
+	var tv []syscall.Timeval = make([]syscall.Timeval, 2)
+	tv[0].Sec = int32(stat.Atime_ns / int64(1000000000))
+	tv[0].Usec = int32((stat.Atime_ns % 1000000000) / 1000)
+	tv[1].Sec = int32(stat.Mtime_ns / int64(1000000000))
+	tv[1].Usec = int32((stat.Mtime_ns % 1000000000) / 1000)
+	errno := syscall.Utimes(dstName, tv)
+	if errno != 0 {
+		fmt.Fprintf(os.Stderr, "Error modifying utimes on %s: %v",
+			dstName, errno)
+		stats.ErrorCount++
+		return
+	}
+
 	stats.FilesCreated++
 }
 
@@ -341,12 +368,6 @@ func SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
 
 	ops := new(outstandingOps)
 
-	// TODO: sync contents
-	fmt.Printf("Syncing dir %s -> %s\n", srcDir, dstDir)
-	fmt.Println("src contents:", srcDirnames)
-	fmt.Println("dst contents:", dstDirnames)
-
-	fmt.Println("inDst contents:")
 	for e := range inDst.Iter() {
 		fmt.Println("  *", e)
 	}
