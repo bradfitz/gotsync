@@ -146,11 +146,12 @@ func RemoveAll(filename string, out chan SyncStats) {
 		out <- *stats
 	}()
 	defer func() {
-		fmt.Println("RemoveAll:", filename, stats)
+		//fmt.Println("RemoveAll:", filename, stats)
 	}()
 
 	dirstat, err := os.Lstat(filename)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Can't stat %s: %v", filename, err)
 		stats.ErrorCount++
 		return
 	}
@@ -168,22 +169,29 @@ func RemoveAll(filename string, out chan SyncStats) {
 
 	// Otherwise, is this a directory we need to recurse into?
 	if !dirstat.IsDirectory() {
+		fmt.Fprintf(os.Stderr, "Not a directory as expected: %s",
+			filename)
 		stats.ErrorCount++
                 return
 	}
 
 	fd, err := os.Open(filename, os.O_RDONLY, 0)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening dir %s: %v",
+			filename, err)
 		stats.ErrorCount++
                 return
 	}
-	defer fd.Close()
 
 	names, err := fd.Readdirnames(-1)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error readdir dir %s: %v",
+			filename, err)
+		fd.Close()
 		stats.ErrorCount++
                 return
 	}
+	fd.Close()
 
 	ops := new(outstandingOps)
 	for _, name := range names {
@@ -257,6 +265,6 @@ func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
 		go RemoveAll(fmt.Sprintf("%s/%s", dstDir.Name(), e), ch)
 		ops.Push(ch)
 	}
-	
+
 	out <- *stats
 }
