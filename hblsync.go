@@ -93,7 +93,7 @@ func (stats *SyncStats) incrementBy(delta *SyncStats) {
 }
 
 type outstandingOps struct {
-	v vector.Vector;
+	v vector.Vector;  // of chan SyncStats
 }
 
 func (ops *outstandingOps) new() chan SyncStats {
@@ -130,7 +130,7 @@ func stringSet(items []string) map[string]bool {
 	return set
 }
 
-func mapLookup(someMap map[string]bool) func(entry interface{}) bool {
+func makeMapLookupTest(someMap map[string]bool) func(entry interface{}) bool {
 	return func(entry interface{}) bool {
                 name := entry.(string)
 		if someMap[name] {
@@ -231,8 +231,8 @@ func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
 
 	srcSet := stringSet(srcDirnames)
 	dstSet := stringSet(dstDirnames)
-	inSourceDir := mapLookup(srcSet)
-	inDestDir := mapLookup(dstSet)
+	inSourceDir := makeMapLookupTest(srcSet)
+	inDestDir := makeMapLookupTest(dstSet)
 	notInSourceDir := func(entry interface{}) bool {
 		return !inSourceDir(entry)
 	}
