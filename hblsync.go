@@ -397,7 +397,7 @@ func CheckOrMakeEqual(srcName string, dstName string, out chan SyncStats) {
 func Copy(srcName string, dstName string, out chan SyncStats) {
 	srcStat, serr := os.Lstat(srcName)
 	if serr != nil {
-                fmt.Fprintf(os.Stderr, "Can't stat source %s: %v", srcName, serr)
+                fmt.Fprintf(os.Stderr, "Can't stat source %s: %v\n", srcName, serr)
 		sendError(out)
 		return
 	}
@@ -450,6 +450,9 @@ func RemoveAll(filename string, out chan SyncStats) {
 	// Leaf case: if Remove works, we're done.
 	err = os.Remove(filename)
 	if err == nil {
+		if (*verbose) {
+			fmt.Println("x", filename)
+		}
 		if dirstat.IsDirectory() {
 			stats.DirsDeleted++
 		} else {
