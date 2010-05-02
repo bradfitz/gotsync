@@ -15,6 +15,7 @@ import "fmt"
 import "os"
 import "syscall"
 
+var verbose *bool = flag.Bool("v", false, "verbose")
 var delete *bool = flag.Bool("delete", false, "delete mode (takes 1 argument)")
 
 func usage() {
@@ -41,24 +42,43 @@ func main() {
 	}
 
 	srcDir, dstDir := flag.Arg(0), flag.Arg(1)
-	ensureDirectory("source", srcDir)
-	ensureDirectory("destination", dstDir)
+	permission := checkSourceDirectory(srcDir)
+	checkOrMakeDestinationDirectory(dstDir, permission)
 
 	go SyncDirectories(srcDir, dstDir, resultChan)
 	fmt.Println("Results:", <-resultChan)
 }
 
-func ensureDirectory(which string, dirName string) {
+func checkSourceDirectory(dirName string) int {
 	stat, e := os.Stat(dirName)
 	if e != nil {
-		fmt.Fprintf(os.Stderr, "Error stat'ing %s directory: %s\n",
-			which, e.String())
+		fmt.Fprintf(os.Stderr, "Error checking source directory: %v\n", e)
 		os.Exit(1)
 	}
 	if !stat.IsDirectory() {
-		fmt.Fprintf(os.Stderr, "%s directory isn't a directory: %s\n",
-			which, dirName)
+		fmt.Fprintf(os.Stderr, "Source directory (%s) isn't a directory.",
+			dirName)
 		os.Exit(1)
+	}
+	return stat.Permission()
+}
+
+func checkOrMakeDestinationDirectory(dirName string, permission int) {
+        stat, e := os.Stat(dirName)
+	if e == nil {
+		if stat.IsDirectory() {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Target directory (%s) exists but " +
+			"isn't a directory.\n", dirName)
+		os.Exit(1)
+	}
+
+	err := os.Mkdir(dirName, permission)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create destination " +
+			"directory: %v\n", err)
+                os.Exit(1)
 	}
 }
 
@@ -68,10 +88,10 @@ type SyncStats struct {
 	FilesGood int   // no change needed
 	DirsGood int    // already existed (contents might be wrong)
 
-	DirsCreated int
 	FilesCreated int
+	DirsCreated int
 
-	FilesReplaced int  // existed, but wrong. doesn't count in FilesDeleted
+	FilesWrong int  // existed, but wrong. also counts in FilesDeleted
 	DirsDeleted int
 	FilesDeleted int
 }
@@ -82,7 +102,7 @@ func (stats *SyncStats) incrementBy(delta *SyncStats) {
 	stats.DirsDeleted += delta.DirsDeleted
 	stats.DirsGood += delta.DirsGood
 	stats.FilesCreated += delta.FilesCreated
-	stats.FilesReplaced += delta.FilesReplaced
+	stats.FilesWrong += delta.FilesWrong
 	stats.FilesDeleted += delta.FilesDeleted
 	stats.FilesGood += delta.FilesGood
 }
@@ -217,6 +237,9 @@ func copyRegularFile(srcName string, stat *os.FileInfo, dstName string,
 	}
 
 	stats.FilesCreated++
+	if (*verbose) {
+		fmt.Println(dstName)
+	}
 }
 
 func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
@@ -230,6 +253,9 @@ func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
 		return
 	}
 	stats.DirsCreated++
+	if (*verbose) {
+		fmt.Println(dstName)
+	}
 
 	ops := new(outstandingOps)
 	go SyncDirectories(srcName, dstName, ops.new())
@@ -242,6 +268,82 @@ func sendError(out chan SyncStats) {
 	out <- *stats
 }
 
+func lstatAsync(filename string) chan *os.FileInfo {
+	ch := make(chan *os.FileInfo)
+	go func() {
+		stat, err := os.Lstat(filename)
+		if err != nil {
+			ch <- nil
+		} else {
+			ch <- stat
+		}
+	}()
+	return ch
+}
+
+// Stats both srcName and dstName.  If they're files and have same
+// FileInfo, no changes.  If they're directories, syncs them.  Will
+// destroy dstName if it needs to be replaced with the right type.
+//
+// To be run in a goroutine.  Writes its aggregate stats to out.
+//
+// Precondition:  dstName exists.
+func CheckOrMakeEqual(srcName string, dstName string, out chan SyncStats) {
+	stats := new(SyncStats)
+        defer func() { out <- *stats }()
+
+	// Kick off async stats
+	srcStatChan := lstatAsync(srcName)
+	dstStatChan := lstatAsync(dstName)
+
+	srcStat := <- srcStatChan
+	dstStat := <- dstStatChan
+	if srcStat == nil || dstStat == nil {
+		stats.ErrorCount++
+                return
+	}
+
+	if srcStat.IsRegular() {
+		if dstStat.IsRegular() {
+			// TODO: check uid/gid too probably
+			if srcStat.Size == dstStat.Size &&
+				srcStat.Mtime_ns == dstStat.Mtime_ns &&
+				srcStat.Mode == dstStat.Mode {
+				stats.FilesGood++
+				return
+			}
+		}
+		stats.FilesWrong++
+	} else if srcStat.IsDirectory() {
+		if dstStat.IsDirectory() {
+			stats.DirsGood++
+			ops := new(outstandingOps)
+			go SyncDirectories(srcName, dstName, ops.new())
+			ops.wait(stats)
+			return
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Unhandled filetype %s\n", srcName)
+		stats.ErrorCount++
+		return
+	}
+
+	// Kill whatever it was...
+	ops := new(outstandingOps)
+	go RemoveAll(dstName, ops.new())
+	ops.wait(stats)
+
+	// And copy it over..
+	ops = new(outstandingOps)
+	go Copy(srcName, dstName, ops.new())
+	ops.wait(stats)
+}
+
+// Copy srcName to dstName, whatever srcName happens to be.
+//
+// To be run in a goroutine.  Writes its aggregate stats to out.
+//
+// Precondition:  dstName doesn't exist
 func Copy(srcName string, dstName string, out chan SyncStats) {
 	srcStat, serr := os.Lstat(srcName)
 	if serr != nil {
@@ -369,7 +471,9 @@ func SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
 	ops := new(outstandingOps)
 
 	for e := range inDst.Iter() {
-		fmt.Println("  *", e)
+		go CheckOrMakeEqual(fmt.Sprintf("%s/%s", srcDir, e),
+                                    fmt.Sprintf("%s/%s", dstDir, e),
+			            ops.new())
 	}
 
 	for e := range notInDst.Iter() {
@@ -383,7 +487,5 @@ func SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
 	}
 
 	ops.wait(stats)
-
-	fmt.Printf("sending stats for sync of dir %s\n", srcDir)
 	out <- *stats
 }
