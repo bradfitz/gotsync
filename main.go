@@ -35,6 +35,7 @@ func main() {
 	resultChan := make(chan gotsync.SyncStats)
 
 	syncer := gotsync.New()
+	syncer.Verbose = *verbose
 
 	// Delete mode
 	if (*delete) {

@@ -13,4 +13,4 @@ ln -s LinkTarget2 /tmp/hblsync-a/foo/bar/quux
 
 rm -rf /tmp/hblsync-b
 mkdir /tmp/hblsync-b
-./gotsync /tmp/hblsync-a /tmp/hblsync-b
+./gotsync -v /tmp/hblsync-a /tmp/hblsync-b
