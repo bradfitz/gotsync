@@ -1,85 +1,31 @@
-// hblsync -- High Bandwidth & Latency directory sync tool
+//
+// Massively parallel filesystem tree syncer.
+//
+// Assumes filesystem stats are slow (such as syncing a large tree
+// from local disk to a remote NFS server, where dentries need
+// to be revalidated remotely...)
 //
 // Copyright 2010 Brad Fitzpatrick
 // brad@danga.com
 //
-// Usage: hblsync <srcdir> <dstdir>
-//
 
-package main
+package gotsync
 
 import "container/vector"
 import "exp/iterable"
-import "flag"
 import "fmt"
 import "os"
+import "io"
 import "syscall"
 
-var verbose *bool = flag.Bool("v", false, "verbose")
-var delete *bool = flag.Bool("delete", false, "delete mode (takes 1 argument)")
-
-func usage() {
-	os.Stderr.WriteString("Usage: hblsync <src_dir> <dst_dir>\n")
-	os.Stderr.WriteString("       hblsync --delete <dir>\n")
-	os.Exit(1)
+type Syncer struct {
+	Verbose bool
+	ErrorWriter io.Writer
+	VerboseWriter io.Writer
 }
 
-func main() {
-	flag.Parse()
-	resultChan := make(chan SyncStats)
-
-	// Delete mode
-	if (*delete) {
-		if (flag.NArg() != 1) { usage() }
-		go RemoveAll(flag.Arg(0), resultChan)
-		fmt.Println("Results:", <-resultChan)
-		return
-	}
-
-	// Sync mode
-	if (flag.NArg() != 2) {
-		usage();
-	}
-
-	srcDir, dstDir := flag.Arg(0), flag.Arg(1)
-	permission := checkSourceDirectory(srcDir)
-	checkOrMakeDestinationDirectory(dstDir, permission)
-
-	go SyncDirectories(srcDir, dstDir, resultChan)
-	fmt.Print(<-resultChan)
-}
-
-func checkSourceDirectory(dirName string) int {
-	stat, e := os.Stat(dirName)
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "Error checking source directory: %v\n", e)
-		os.Exit(1)
-	}
-	if !stat.IsDirectory() {
-		fmt.Fprintf(os.Stderr, "Source directory (%s) isn't a directory.",
-			dirName)
-		os.Exit(1)
-	}
-	return stat.Permission()
-}
-
-func checkOrMakeDestinationDirectory(dirName string, permission int) {
-        stat, e := os.Stat(dirName)
-	if e == nil {
-		if stat.IsDirectory() {
-			return
-		}
-		fmt.Fprintf(os.Stderr, "Target directory (%s) exists but " +
-			"isn't a directory.\n", dirName)
-		os.Exit(1)
-	}
-
-	err := os.Mkdir(dirName, permission)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create destination " +
-			"directory: %v\n", err)
-                os.Exit(1)
-	}
+func New() *Syncer {
+	return &Syncer{false, os.Stderr, os.Stdout}
 }
 
 type SyncStats struct {
@@ -200,8 +146,8 @@ func makeMapLookupTest(someMap map[string]bool) func(entry interface{}) bool {
 	}
 }
 
-func copyRegularFile(srcName string, stat *os.FileInfo, dstName string,
-	             out chan SyncStats) {
+func (self *Syncer) copyRegularFile(
+	srcName string, stat *os.FileInfo, dstName string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() { out <- *stats }()
 
@@ -276,13 +222,13 @@ func copyRegularFile(srcName string, stat *os.FileInfo, dstName string,
 	}
 
 	stats.FilesCreated++
-	if (*verbose) {
-		fmt.Println(dstName)
+	if (self.Verbose) {
+		fmt.Fprintln(self.VerboseWriter, dstName)
 	}
 }
 
-func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
-	           out chan SyncStats) {
+func (self *Syncer) copyDirectory(
+	srcName string, stat *os.FileInfo, dstName string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() { out <- *stats }()
 
@@ -292,12 +238,12 @@ func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
 		return
 	}
 	stats.DirsCreated++
-	if (*verbose) {
-		fmt.Println(dstName)
+	if (self.Verbose) {
+		fmt.Fprintln(self.VerboseWriter, dstName)
 	}
 
 	ops := new(outstandingOps)
-	go SyncDirectories(srcName, dstName, ops.new())
+	go self.SyncDirectories(srcName, dstName, ops.new())
 	ops.wait(stats)
 }
 
@@ -327,7 +273,8 @@ func lstatAsync(filename string) chan *os.FileInfo {
 // To be run in a goroutine.  Writes its aggregate stats to out.
 //
 // Precondition:  dstName exists.
-func CheckOrMakeEqual(srcName string, dstName string, out chan SyncStats) {
+func (self *Syncer) CheckOrMakeEqual(
+	srcName string, dstName string, out chan SyncStats) {
 	stats := new(SyncStats)
         defer func() { out <- *stats }()
 
@@ -357,7 +304,7 @@ func CheckOrMakeEqual(srcName string, dstName string, out chan SyncStats) {
 		if dstStat.IsDirectory() {
 			stats.DirsGood++
 			ops := new(outstandingOps)
-			go SyncDirectories(srcName, dstName, ops.new())
+			go self.SyncDirectories(srcName, dstName, ops.new())
 			ops.wait(stats)
 			return
 		}
@@ -380,33 +327,36 @@ func CheckOrMakeEqual(srcName string, dstName string, out chan SyncStats) {
 
 	// Kill whatever it was...
 	ops := new(outstandingOps)
-	go RemoveAll(dstName, ops.new())
+	go self.RemoveAll(dstName, ops.new())
 	ops.wait(stats)
 
 	// And copy it over..
 	ops = new(outstandingOps)
-	go Copy(srcName, dstName, ops.new())
+	go self.Copy(srcName, dstName, ops.new())
 	ops.wait(stats)
 }
 
 // Copy srcName to dstName, whatever srcName happens to be.
 //
-// To be run in a goroutine.  Writes its aggregate stats to out.
+// Writes its aggregate stats to out.
 //
 // Precondition:  dstName doesn't exist
-func Copy(srcName string, dstName string, out chan SyncStats) {
+func (self *Syncer) Copy(srcName string, dstName string, out chan SyncStats) {
 	srcStat, serr := os.Lstat(srcName)
 	if serr != nil {
-                fmt.Fprintf(os.Stderr, "Can't stat source %s: %v\n", srcName, serr)
+                fmt.Fprintf(self.ErrorWriter, "Can't stat source %s: %v\n",
+			srcName, serr)
 		sendError(out)
 		return
 	}
 
 	switch {
 	case srcStat.IsRegular():
-		copyRegularFile(srcName, srcStat, dstName, out)
+		self.copyRegularFile(srcName, srcStat, dstName, out)
+
 	case srcStat.IsDirectory():
-		copyDirectory(srcName, srcStat, dstName, out)
+		self.copyDirectory(srcName, srcStat, dstName, out)
+
 	case srcStat.IsSymlink():
 		target, lerr := os.Readlink(srcName)
 		if lerr != nil {
@@ -423,6 +373,7 @@ func Copy(srcName string, dstName string, out chan SyncStats) {
 		stats := new(SyncStats)
 		stats.SymlinksCreated++
 		out <- *stats
+
 	default:
 		// TODO: symlinks, etc
 		fmt.Fprintf(os.Stderr, "Can't handle special file %s\n",
@@ -431,13 +382,10 @@ func Copy(srcName string, dstName string, out chan SyncStats) {
 	}
 }
 
-func RemoveAll(filename string, out chan SyncStats) {
+func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() {
 		out <- *stats
-	}()
-	defer func() {
-		//fmt.Println("RemoveAll:", filename, stats)
 	}()
 
 	dirstat, err := os.Lstat(filename)
@@ -450,8 +398,8 @@ func RemoveAll(filename string, out chan SyncStats) {
 	// Leaf case: if Remove works, we're done.
 	err = os.Remove(filename)
 	if err == nil {
-		if (*verbose) {
-			fmt.Println("x", filename)
+		if (self.Verbose) {
+			fmt.Fprintln(self.VerboseWriter, "x", filename)
 		}
 		if dirstat.IsDirectory() {
 			stats.DirsDeleted++
@@ -489,7 +437,7 @@ func RemoveAll(filename string, out chan SyncStats) {
 
 	ops := new(outstandingOps)
 	for _, name := range names {
-		go RemoveAll(fmt.Sprintf("%s/%s", filename, name), ops.new())
+		go self.RemoveAll(fmt.Sprintf("%s/%s", filename, name), ops.new())
 	}
 	ops.wait(stats)
 
@@ -502,8 +450,10 @@ func RemoveAll(filename string, out chan SyncStats) {
 	}
 }
 
-func SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
+func (self *Syncer) SyncDirectories(srcDir string, dstDir string,
+	out chan SyncStats) {
 	stats := new(SyncStats)
+	defer func() { out <- *stats }()
 
 	var srcDirnames []string
 	var dstDirnames []string
@@ -520,7 +470,6 @@ func SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
 		fmt.Fprintf(os.Stderr, "Error reading %v\n", dstDir)
 	}
 	if stats.ErrorCount != 0 {
-		out <- *stats
 		return
 	}
 
@@ -540,21 +489,22 @@ func SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
 	ops := new(outstandingOps)
 
 	for e := range inDst.Iter() {
-		go CheckOrMakeEqual(fmt.Sprintf("%s/%s", srcDir, e),
-                                    fmt.Sprintf("%s/%s", dstDir, e),
-			            ops.new())
+		go self.CheckOrMakeEqual(fmt.Sprintf("%s/%s", srcDir, e),
+                        fmt.Sprintf("%s/%s", dstDir, e),
+			ops.new())
 	}
 
 	for e := range notInDst.Iter() {
-		go Copy(fmt.Sprintf("%s/%s", srcDir, e),
+		go self.Copy(fmt.Sprintf("%s/%s", srcDir, e),
 			fmt.Sprintf("%s/%s", dstDir, e),
 			ops.new())
 	}
 
 	for e := range toBeDeletedNames.Iter() {
-		go RemoveAll(fmt.Sprintf("%s/%s", dstDir, e), ops.new())
+		go self.RemoveAll(fmt.Sprintf("%s/%s", dstDir, e), ops.new())
 	}
 
 	ops.wait(stats)
-	out <- *stats
 }
+
+

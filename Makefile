@@ -1,3 +1,7 @@
-hblsync: hblsync.go
-	8g hblsync.go
-	8l -o hblsync hblsync.8
+include $(GOROOT)/src/Make.$(GOARCH)
+
+TARG=gotsync
+GOFILES=gotsync.go
+# main.go
+
+include $(GOROOT)/src/Make.pkg
