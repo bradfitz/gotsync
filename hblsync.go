@@ -140,19 +140,62 @@ func makeMapLookupTest(someMap map[string]bool) func(entry interface{}) bool {
 	}
 }
 
-func copyFile(srcName string, dstName string, out chan SyncStats) {
-	fmt.Printf("Copying files not yet implemented-- %s -> %s\n",
-		srcName, dstName)
-	// TODO: implement
-	sendError(out)
+func copyRegularFile(srcName string, stat *os.FileInfo, dstName string,
+	             out chan SyncStats) {
+	stats := new(SyncStats)
+	defer func() { out <- *stats }()
+
+	outfd, err := os.Open(dstName, os.O_CREATE|os.O_EXCL|os.O_WRONLY,
+		stat.Permission())
+	if err != nil {
+		fmt.Fprintf(os.Stderr,
+			"Error opening copy output file %s: %s\n",
+			dstName, err)
+		stats.ErrorCount++
+		return
+	}
+	defer outfd.Close()
+
+	infd, err := os.Open(srcName, os.O_RDONLY, 0)
+	if err != nil {
+                fmt.Fprintf(os.Stderr,
+                        "Error opening copy source file %s: %s\n",
+                        srcName, err)
+                stats.ErrorCount++
+                return
+	}
+	defer infd.Close()
+
+	const BUF_SIZE = 1024 * 256
+	buf := make([]byte, BUF_SIZE)
+	bytesRemain := stat.Size
+	for (bytesRemain > 0) {
+		n, err := infd.Read(buf)
+		switch {
+		case n == 0:
+			stats.FilesCreated++
+			return
+		case n < 0:
+			stats.ErrorCount++
+			fmt.Fprintf(os.Stderr, "Error copying file %s in read: %s",
+				srcName, err)
+			return
+		default:
+			outN, err := outfd.Write(buf[0 : n])
+			if err != nil || outN != n {
+				fmt.Fprintf(os.Stderr, "Error copying file %s in write: %s",
+					srcName, err)
+				return
+			}
+			bytesRemain -= int64(outN)
+		}
+	}
 }
 
 func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
 	           out chan SyncStats) {
 	stats := new(SyncStats)
-	defer func() {
-		out <- *stats
-	}()
+	defer func() { out <- *stats }()
 
 	err := os.Mkdir(dstName, stat.Permission())
 	if err != nil {
@@ -173,7 +216,7 @@ func sendError(out chan SyncStats) {
 }
 
 func Copy(srcName string, dstName string, out chan SyncStats) {
-	srcstat, serr := os.Lstat(srcName)
+	srcStat, serr := os.Lstat(srcName)
 	if serr != nil {
                 fmt.Fprintf(os.Stderr, "Can't stat source %s: %v", srcName, serr)
 		sendError(out)
@@ -181,10 +224,10 @@ func Copy(srcName string, dstName string, out chan SyncStats) {
 	}
 
 	switch {
-	case srcstat.IsRegular():
-		copyFile(srcName, dstName, out)
-	case srcstat.IsDirectory():
-		copyDirectory(srcName, srcstat, dstName, out)
+	case srcStat.IsRegular():
+		copyRegularFile(srcName, srcStat, dstName, out)
+	case srcStat.IsDirectory():
+		copyDirectory(srcName, srcStat, dstName, out)
 	default:
 		// TODO: symlinks, etc
 		fmt.Fprintf(os.Stderr, "Can't handle special file %s",
