@@ -111,16 +111,16 @@ func (ops *outstandingOps) wait(outStats *SyncStats) {
 	}
 }
 
-func readDirnames(dir string, outNames *[]string, ok chan bool) {
+func (self *Syncer) readDirnames(dir string, outNames *[]string, ok chan bool) {
 	fd, err := os.Open(dir, os.O_RDONLY, 0)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading dirnames: %v\n", err)
+		fmt.Fprintf(self.ErrorWriter, "Error reading dirnames: %v\n", err)
 		ok <- false
 	}
 	defer fd.Close()
 	names, err := fd.Readdirnames(-1)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading dirnames: %v\n", err)
+		fmt.Fprintf(self.ErrorWriter, "Error reading dirnames: %v\n", err)
 		ok <- false
 	} else {
 		*outNames = names
@@ -154,7 +154,7 @@ func (self *Syncer) copyRegularFile(
 	outfd, err := os.Open(dstName, os.O_CREATE|os.O_EXCL|os.O_WRONLY,
 		stat.Permission())
 	if err != nil {
-		fmt.Fprintf(os.Stderr,
+		fmt.Fprintf(self.ErrorWriter,
 			"Error opening copy output file %s: %s\n",
 			dstName, err)
 		stats.ErrorCount++
@@ -164,7 +164,7 @@ func (self *Syncer) copyRegularFile(
 
 	infd, err := os.Open(srcName, os.O_RDONLY, 0)
 	if err != nil {
-                fmt.Fprintf(os.Stderr,
+                fmt.Fprintf(self.ErrorWriter,
                         "Error opening copy source file %s: %s\n",
                         srcName, err)
                 stats.ErrorCount++
@@ -182,13 +182,13 @@ func (self *Syncer) copyRegularFile(
 			break
 		case n < 0:
 			stats.ErrorCount++
-			fmt.Fprintf(os.Stderr, "Error copying file %s in read: %s",
+			fmt.Fprintf(self.ErrorWriter, "Error copying file %s in read: %s",
 				srcName, err)
 			return
 		default:
 			outN, err := outfd.Write(buf[0 : n])
 			if err != nil || outN != n {
-				fmt.Fprintf(os.Stderr, "Error copying file %s in write: %s",
+				fmt.Fprintf(self.ErrorWriter, "Error copying file %s in write: %s",
 					srcName, err)
 				return
 			}
@@ -215,7 +215,7 @@ func (self *Syncer) copyRegularFile(
 	tv[1].Usec = int32((stat.Mtime_ns % 1000000000) / 1000)
 	errno := syscall.Utimes(dstName, tv)
 	if errno != 0 {
-		fmt.Fprintf(os.Stderr, "Error modifying utimes on %s: %v",
+		fmt.Fprintf(self.ErrorWriter, "Error modifying utimes on %s: %v",
 			dstName, errno)
 		stats.ErrorCount++
 		return
@@ -320,7 +320,7 @@ func (self *Syncer) CheckOrMakeEqual(
 		}
 		stats.SymlinksWrong++
 	} else {
-		fmt.Fprintf(os.Stderr, "Unhandled filetype %s\n", srcName)
+		fmt.Fprintf(self.ErrorWriter, "Unhandled filetype %s\n", srcName)
 		stats.ErrorCount++
 		return
 	}
@@ -365,7 +365,7 @@ func (self *Syncer) Copy(srcName string, dstName string, out chan SyncStats) {
 		}
 		lerr = os.Symlink(target, dstName)
 		if lerr != nil {
-			fmt.Fprintf(os.Stderr, "Error making symlink %s: %v\n",
+			fmt.Fprintf(self.ErrorWriter, "Error making symlink %s: %v\n",
 				dstName, lerr)
 			sendError(out)
                         return
@@ -376,7 +376,7 @@ func (self *Syncer) Copy(srcName string, dstName string, out chan SyncStats) {
 
 	default:
 		// TODO: symlinks, etc
-		fmt.Fprintf(os.Stderr, "Can't handle special file %s\n",
+		fmt.Fprintf(self.ErrorWriter, "Can't handle special file %s\n",
 			srcName)
 		sendError(out)
 	}
@@ -390,7 +390,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 
 	dirstat, err := os.Lstat(filename)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Can't stat %s: %v", filename, err)
+		fmt.Fprintf(self.ErrorWriter, "Can't stat %s: %v", filename, err)
 		stats.ErrorCount++
 		return
 	}
@@ -411,7 +411,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 
 	// Otherwise, is this a directory we need to recurse into?
 	if !dirstat.IsDirectory() {
-		fmt.Fprintf(os.Stderr, "Not a directory as expected: %s",
+		fmt.Fprintf(self.ErrorWriter, "Not a directory as expected: %s",
 			filename)
 		stats.ErrorCount++
                 return
@@ -419,7 +419,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 
 	fd, err := os.Open(filename, os.O_RDONLY, 0)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening dir %s: %v",
+		fmt.Fprintf(self.ErrorWriter, "Error opening dir %s: %v",
 			filename, err)
 		stats.ErrorCount++
                 return
@@ -427,7 +427,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 
 	names, err := fd.Readdirnames(-1)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error readdir dir %s: %v",
+		fmt.Fprintf(self.ErrorWriter, "Error readdir dir %s: %v",
 			filename, err)
 		fd.Close()
 		stats.ErrorCount++
@@ -459,15 +459,15 @@ func (self *Syncer) SyncDirectories(srcDir string, dstDir string,
 	var dstDirnames []string
 	srcReadOp := make(chan bool)
 	dstReadOp := make(chan bool)
-	go readDirnames(srcDir, &srcDirnames, srcReadOp)
-	go readDirnames(dstDir, &dstDirnames, dstReadOp)
+	go self.readDirnames(srcDir, &srcDirnames, srcReadOp)
+	go self.readDirnames(dstDir, &dstDirnames, dstReadOp)
 	if !<-srcReadOp {
 		stats.ErrorCount++
-		fmt.Fprintf(os.Stderr, "Error reading %v\n", srcDir)
+		fmt.Fprintf(self.ErrorWriter, "Error reading %v\n", srcDir)
 	}
 	if !<-dstReadOp {
 		stats.ErrorCount++
-		fmt.Fprintf(os.Stderr, "Error reading %v\n", dstDir)
+		fmt.Fprintf(self.ErrorWriter, "Error reading %v\n", dstDir)
 	}
 	if stats.ErrorCount != 0 {
 		return
