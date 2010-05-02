@@ -242,7 +242,7 @@ func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
 	inDst, notInDst := iterable.Partition(srcNamesIter, inDestDir)
 	toBeDeletedNames := iterable.Filter(dstNamesIter, notInSourceDir)
 
-	ops := new(vector.Vector)
+	ops := new(outstandingOps)
 
 	// TODO: sync contents
 	fmt.Println("src contents:", srcDirnames)
@@ -261,10 +261,9 @@ func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
 	fmt.Println("To be deleted:")
 	for e := range toBeDeletedNames.Iter() {
 		fmt.Println("  * (delete)", e)
-		ch := make(chan SyncStats)
-		go RemoveAll(fmt.Sprintf("%s/%s", dstDir.Name(), e), ch)
-		ops.Push(ch)
+		go RemoveAll(fmt.Sprintf("%s/%s", dstDir.Name(), e), ops.new())
 	}
 
+	ops.wait(stats)
 	out <- *stats
 }
