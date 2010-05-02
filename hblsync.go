@@ -46,7 +46,7 @@ func main() {
 	checkOrMakeDestinationDirectory(dstDir, permission)
 
 	go SyncDirectories(srcDir, dstDir, resultChan)
-	fmt.Println("Results:", <-resultChan)
+	fmt.Print(<-resultChan)
 }
 
 func checkSourceDirectory(dirName string) int {
@@ -87,24 +87,63 @@ type SyncStats struct {
 
 	FilesGood int   // no change needed
 	DirsGood int    // already existed (contents might be wrong)
+	SymlinksGood int
 
 	FilesCreated int
 	DirsCreated int
+	SymlinksCreated int
 
-	FilesWrong int  // existed, but wrong. also counts in FilesDeleted
+	// existed, but wrong. also counts in Deleted
+	FilesWrong int
+	SymlinksWrong int
+
 	DirsDeleted int
 	FilesDeleted int
 }
 
 func (stats *SyncStats) incrementBy(delta *SyncStats) {
 	stats.ErrorCount += delta.ErrorCount
-	stats.DirsCreated += delta.DirsCreated
-	stats.DirsDeleted += delta.DirsDeleted
-	stats.DirsGood += delta.DirsGood
-	stats.FilesCreated += delta.FilesCreated
-	stats.FilesWrong += delta.FilesWrong
-	stats.FilesDeleted += delta.FilesDeleted
+
 	stats.FilesGood += delta.FilesGood
+	stats.DirsGood += delta.DirsGood
+	stats.SymlinksGood += delta.SymlinksGood
+
+	stats.FilesCreated += delta.FilesCreated
+	stats.DirsCreated += delta.DirsCreated
+	stats.SymlinksCreated += delta.SymlinksCreated
+
+	stats.FilesWrong += delta.FilesWrong
+	stats.SymlinksWrong += delta.SymlinksWrong
+
+	stats.DirsDeleted += delta.DirsDeleted
+	stats.FilesDeleted += delta.FilesDeleted
+}
+
+func (stats SyncStats) String() string {
+	return fmt.Sprintf(`**** Sync stats:
+Errors: %d
+Good/Wrong
+ - files: %d/%d
+ - dirs: %d
+ - symlinks: %d/%d
+Created:
+ - files: %d
+ - dirs: %d
+ - symlinks: %d
+Deleted:
+ - files: %d
+ - dirs: %d
+`,
+		stats.ErrorCount,
+		stats.FilesGood, stats.FilesWrong,
+		stats.DirsGood,
+		stats.SymlinksGood, stats.SymlinksWrong,
+		stats.FilesCreated,
+		stats.DirsCreated,
+		stats.SymlinksCreated,
+		stats.FilesDeleted,
+		stats.DirsDeleted)
+
 }
 
 type outstandingOps struct {
@@ -322,6 +361,17 @@ func CheckOrMakeEqual(srcName string, dstName string, out chan SyncStats) {
 			ops.wait(stats)
 			return
 		}
+	} else if srcStat.IsSymlink() {
+		if dstStat.IsSymlink() {
+			// TODO: do readlinks async
+			srcTarget, errSrc := os.Readlink(srcName)
+			dstTarget, errDst := os.Readlink(dstName)
+			if errSrc == nil && errDst == nil && srcTarget == dstTarget {
+				stats.SymlinksGood++
+				return
+			}
+		}
+		stats.SymlinksWrong++
 	} else {
 		fmt.Fprintf(os.Stderr, "Unhandled filetype %s\n", srcName)
 		stats.ErrorCount++
@@ -357,6 +407,22 @@ func Copy(srcName string, dstName string, out chan SyncStats) {
 		copyRegularFile(srcName, srcStat, dstName, out)
 	case srcStat.IsDirectory():
 		copyDirectory(srcName, srcStat, dstName, out)
+	case srcStat.IsSymlink():
+		target, lerr := os.Readlink(srcName)
+		if lerr != nil {
+			sendError(out)
+			return
+		}
+		lerr = os.Symlink(target, dstName)
+		if lerr != nil {
+			fmt.Fprintf(os.Stderr, "Error making symlink %s: %v\n",
+				dstName, lerr)
+			sendError(out)
+                        return
+		}
+		stats := new(SyncStats)
+		stats.SymlinksCreated++
+		out <- *stats
 	default:
 		// TODO: symlinks, etc
 		fmt.Fprintf(os.Stderr, "Can't handle special file %s\n",
