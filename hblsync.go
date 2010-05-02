@@ -173,8 +173,7 @@ func copyRegularFile(srcName string, stat *os.FileInfo, dstName string,
 		n, err := infd.Read(buf)
 		switch {
 		case n == 0:
-			stats.FilesCreated++
-			return
+			break
 		case n < 0:
 			stats.ErrorCount++
 			fmt.Fprintf(os.Stderr, "Error copying file %s in read: %s",
@@ -190,6 +189,7 @@ func copyRegularFile(srcName string, stat *os.FileInfo, dstName string,
 			bytesRemain -= int64(outN)
 		}
 	}
+	stats.FilesCreated++
 }
 
 func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
