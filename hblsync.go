@@ -140,6 +140,70 @@ func makeMapLookupTest(someMap map[string]bool) func(entry interface{}) bool {
 	}
 }
 
+func copyFile(srcName string, dstName string, out chan SyncStats) {
+	// TODO: implement
+	sendError(out)
+}
+
+func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
+	out chan SyncStats) {
+	stats := new(SyncStats)
+	defer func() {
+		out <- *stats
+	}()
+
+	err := os.Mkdir(dstName, stat.Permission())
+	if err != nil {
+		stats.ErrorCount++
+		return
+	}
+	stats.DirsCreated++
+
+	srcFile, esrc := os.Open(srcName, os.O_RDONLY, 0)
+	dstFile, edst := os.Open(dstName, os.O_RDONLY, 0)
+	if esrc != nil || edst != nil {
+		fmt.Fprintf(os.Stderr, "Error opening directory: %s %s\n",
+			esrc, edst)
+		return
+	}
+
+	ops := new(outstandingOps)
+	SyncDirectories(srcFile, dstFile, ops.new())
+	ops.wait(stats)
+
+	dstFile.Close()
+	srcFile.Close()
+
+	out <- *stats
+}
+
+func sendError(out chan SyncStats) {
+	stats := new(SyncStats)
+	stats.ErrorCount++
+	out <- *stats
+}
+
+func Copy(srcName string, dstName string, out chan SyncStats) {
+	srcstat, serr := os.Lstat(srcName)
+	if serr != nil {
+                fmt.Fprintf(os.Stderr, "Can't stat source %s: %v", srcName, serr)
+		sendError(out)
+		return
+	}
+
+	switch {
+	case srcstat.IsRegular():
+		copyFile(srcName, dstName, out)
+	case srcstat.IsDirectory():
+		copyDirectory(srcName, srcstat, dstName, out)
+	default:
+		// TODO: symlinks, etc
+		fmt.Fprintf(os.Stderr, "Can't handle special file %s",
+			srcName)
+		sendError(out)
+	}
+}
+
 func RemoveAll(filename string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() {
@@ -253,14 +317,13 @@ func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
 		fmt.Println("  *", e)
 	}
 
-	fmt.Println("notInDst contents:")
 	for e := range notInDst.Iter() {
-		fmt.Println("  *", e)
+		go Copy(fmt.Sprintf("%s/%s", srcDir.Name(), e),
+			fmt.Sprintf("%s/%s", dstDir.Name(), e),
+			ops.new())
 	}
 
-	fmt.Println("To be deleted:")
 	for e := range toBeDeletedNames.Iter() {
-		fmt.Println("  * (delete)", e)
 		go RemoveAll(fmt.Sprintf("%s/%s", dstDir.Name(), e), ops.new())
 	}
 
