@@ -38,22 +38,17 @@ func main() {
 	if (flag.NArg() != 2) {
 		usage();
 	}
-	srcFile := openDirectoryOrDie("source", flag.Arg(0))
-	dstFile := openDirectoryOrDie("destination", flag.Arg(1))
 
-	go SyncDirectories(srcFile, dstFile, resultChan)
+	srcDir, dstDir := flag.Arg(0), flag.Arg(1)
+	ensureDirectory("source", srcDir)
+	ensureDirectory("destination", dstDir)
+
+	go SyncDirectories(srcDir, dstDir, resultChan)
 	fmt.Println("Results:", <-resultChan)
 }
 
-
-func openDirectoryOrDie(which string, dirName string) *os.File {
-	file, e := os.Open(dirName, os.O_RDONLY, 0)
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "Error opening %s directory: %s\n",
-			which, e.String())
-		os.Exit(1)
-	}
-	stat, e := file.Stat()
+func ensureDirectory(which string, dirName string) {
+	stat, e := os.Stat(dirName)
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "Error stat'ing %s directory: %s\n",
 			which, e.String())
@@ -64,7 +59,6 @@ func openDirectoryOrDie(which string, dirName string) *os.File {
 			which, dirName)
 		os.Exit(1)
 	}
-	return file
 }
 
 type SyncStats struct {
@@ -111,8 +105,14 @@ func (ops *outstandingOps) wait(outStats *SyncStats) {
 	}
 }
 
-func readDirnames(dir *os.File, outNames *[]string, ok chan bool) {
-	names, err := dir.Readdirnames(-1)
+func readDirnames(dir string, outNames *[]string, ok chan bool) {
+	fd, err := os.Open(dir, os.O_RDONLY, 0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading dirnames: %v\n", err)
+		ok <- false
+	}
+	defer fd.Close()
+	names, err := fd.Readdirnames(-1)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading dirnames: %v\n", err)
 		ok <- false
@@ -141,12 +141,14 @@ func makeMapLookupTest(someMap map[string]bool) func(entry interface{}) bool {
 }
 
 func copyFile(srcName string, dstName string, out chan SyncStats) {
+	fmt.Printf("Copying files not yet implemented-- %s -> %s\n",
+		srcName, dstName)
 	// TODO: implement
 	sendError(out)
 }
 
 func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
-	out chan SyncStats) {
+	           out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() {
 		out <- *stats
@@ -159,22 +161,9 @@ func copyDirectory(srcName string, stat *os.FileInfo, dstName string,
 	}
 	stats.DirsCreated++
 
-	srcFile, esrc := os.Open(srcName, os.O_RDONLY, 0)
-	dstFile, edst := os.Open(dstName, os.O_RDONLY, 0)
-	if esrc != nil || edst != nil {
-		fmt.Fprintf(os.Stderr, "Error opening directory: %s %s\n",
-			esrc, edst)
-		return
-	}
-
 	ops := new(outstandingOps)
-	SyncDirectories(srcFile, dstFile, ops.new())
+	go SyncDirectories(srcName, dstName, ops.new())
 	ops.wait(stats)
-
-	dstFile.Close()
-	srcFile.Close()
-
-	out <- *stats
 }
 
 func sendError(out chan SyncStats) {
@@ -272,8 +261,9 @@ func RemoveAll(filename string, out chan SyncStats) {
 	}
 }
 
-func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
+func SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
 	stats := new(SyncStats)
+
 	var srcDirnames []string
 	var dstDirnames []string
 	srcReadOp := make(chan bool)
@@ -282,11 +272,11 @@ func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
 	go readDirnames(dstDir, &dstDirnames, dstReadOp)
 	if !<-srcReadOp {
 		stats.ErrorCount++
-		fmt.Fprintf(os.Stderr, "Error reading %v", srcDir)
+		fmt.Fprintf(os.Stderr, "Error reading %v\n", srcDir)
 	}
 	if !<-dstReadOp {
 		stats.ErrorCount++
-		fmt.Fprintf(os.Stderr, "Error reading %v", dstDir)
+		fmt.Fprintf(os.Stderr, "Error reading %v\n", dstDir)
 	}
 	if stats.ErrorCount != 0 {
 		out <- *stats
@@ -309,6 +299,7 @@ func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
 	ops := new(outstandingOps)
 
 	// TODO: sync contents
+	fmt.Printf("Syncing dir %s -> %s\n", srcDir, dstDir)
 	fmt.Println("src contents:", srcDirnames)
 	fmt.Println("dst contents:", dstDirnames)
 
@@ -318,15 +309,17 @@ func SyncDirectories(srcDir *os.File, dstDir *os.File, out chan SyncStats) {
 	}
 
 	for e := range notInDst.Iter() {
-		go Copy(fmt.Sprintf("%s/%s", srcDir.Name(), e),
-			fmt.Sprintf("%s/%s", dstDir.Name(), e),
+		go Copy(fmt.Sprintf("%s/%s", srcDir, e),
+			fmt.Sprintf("%s/%s", dstDir, e),
 			ops.new())
 	}
 
 	for e := range toBeDeletedNames.Iter() {
-		go RemoveAll(fmt.Sprintf("%s/%s", dstDir.Name(), e), ops.new())
+		go RemoveAll(fmt.Sprintf("%s/%s", dstDir, e), ops.new())
 	}
 
 	ops.wait(stats)
+
+	fmt.Printf("sending stats for sync of dir %s\n", srcDir)
 	out <- *stats
 }
