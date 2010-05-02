@@ -1,7 +1,9 @@
-include $(GOROOT)/src/Make.$(GOARCH)
+gotsync: main.8 gotsync.8
+	8l -o gotsync main.8
 
-TARG=gotsync
-GOFILES=gotsync.go
-# main.go
+gotsync.8: gotsync.go
+	8g -o gotsync.8 gotsync.go
 
-include $(GOROOT)/src/Make.pkg
+main.8: main.go
+	8g -o main.8 main.go
+

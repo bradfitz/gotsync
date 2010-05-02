@@ -34,10 +34,12 @@ func main() {
 	flag.Parse()
 	resultChan := make(chan gotsync.SyncStats)
 
+	syncer := gotsync.New()
+
 	// Delete mode
 	if (*delete) {
 		if (flag.NArg() != 1) { usage() }
-		go gotsync.RemoveAll(flag.Arg(0), resultChan)
+		go syncer.RemoveAll(flag.Arg(0), resultChan)
 		fmt.Print(<-resultChan)
 		return
 	}
@@ -51,7 +53,7 @@ func main() {
 	permission := checkSourceDirectory(srcDir)
 	checkOrMakeDestinationDirectory(dstDir, permission)
 
-	go gotsync.SyncDirectories(srcDir, dstDir, resultChan)
+	go syncer.SyncDirectories(srcDir, dstDir, resultChan)
 	fmt.Print(<-resultChan)
 }
 
