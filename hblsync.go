@@ -359,7 +359,7 @@ func Copy(srcName string, dstName string, out chan SyncStats) {
 		copyDirectory(srcName, srcStat, dstName, out)
 	default:
 		// TODO: symlinks, etc
-		fmt.Fprintf(os.Stderr, "Can't handle special file %s",
+		fmt.Fprintf(os.Stderr, "Can't handle special file %s\n",
 			srcName)
 		sendError(out)
 	}
