@@ -24,6 +24,10 @@ type Syncer struct {
 	VerboseWriter io.Writer
 }
 
+// Constructs a new, default Syncer which writes errors to stderr
+// and is not verbose.
+//
+// Mutate the returned environment to taste.
 func New() *Syncer {
 	return &Syncer{false, os.Stderr, os.Stdout}
 }
@@ -273,7 +277,7 @@ func lstatAsync(filename string) chan *os.FileInfo {
 // To be run in a goroutine.  Writes its aggregate stats to out.
 //
 // Precondition:  dstName exists.
-func (self *Syncer) CheckOrMakeEqual(
+func (self *Syncer) checkOrMakeEqual(
 	srcName string, dstName string, out chan SyncStats) {
 	stats := new(SyncStats)
         defer func() { out <- *stats }()
@@ -382,6 +386,13 @@ func (self *Syncer) Copy(srcName string, dstName string, out chan SyncStats) {
 	}
 }
 
+// Deletes filename, and recursively if a directory.
+//
+// This is similar to os.RemoveAll, except this version runs
+// concurrently on all files and subdirectories when deleting
+// directories and recursing into them to delete them.
+//
+// Aggregate stats are written to the provided channel.
 func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() {
@@ -489,7 +500,7 @@ func (self *Syncer) SyncDirectories(srcDir string, dstDir string,
 	ops := new(outstandingOps)
 
 	for e := range inDst.Iter() {
-		go self.CheckOrMakeEqual(fmt.Sprintf("%s/%s", srcDir, e),
+		go self.checkOrMakeEqual(fmt.Sprintf("%s/%s", srcDir, e),
                         fmt.Sprintf("%s/%s", dstDir, e),
 			ops.new())
 	}
