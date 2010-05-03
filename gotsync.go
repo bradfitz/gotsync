@@ -22,8 +22,8 @@ import "io"
 import "syscall"
 
 type Syncer struct {
-	Verbose bool
-	ErrorWriter io.Writer
+	Verbose       bool
+	ErrorWriter   io.Writer
 	VerboseWriter io.Writer
 }
 
@@ -38,19 +38,19 @@ func New() *Syncer {
 type SyncStats struct {
 	ErrorCount int
 
-	FilesGood int   // no change needed
-	DirsGood int    // already existed (contents might be wrong)
+	FilesGood    int // no change needed
+	DirsGood     int // already existed (contents might be wrong)
 	SymlinksGood int
 
-	FilesCreated int
-	DirsCreated int
+	FilesCreated    int
+	DirsCreated     int
 	SymlinksCreated int
 
 	// existed, but wrong. also counts in Deleted
-	FilesWrong int
+	FilesWrong    int
 	SymlinksWrong int
 
-	DirsDeleted int
+	DirsDeleted  int
 	FilesDeleted int
 }
 
@@ -100,7 +100,7 @@ Deleted:
 }
 
 type outstandingOps struct {
-	v vector.Vector;  // of chan SyncStats
+	v vector.Vector // of chan SyncStats
 }
 
 func (ops *outstandingOps) new() chan SyncStats {
@@ -135,26 +135,22 @@ func (self *Syncer) readDirnames(dir string, outNames *[]string, ok chan bool) {
 	}
 }
 
-func stringSet(items []string) map[string]bool {
-	var set = map[string]bool {}
+func makeListContainsFunc(items []string) func(entry interface{}) bool {
+	var set = map[string]bool{}
 	for _, name := range items {
 		set[name] = true
 	}
-	return set
-}
 
-func makeMapLookupTest(someMap map[string]bool) func(entry interface{}) bool {
 	return func(entry interface{}) bool {
-                name := entry.(string)
-		if someMap[name] {
+		name := entry.(string)
+		if set[name] {
 			return true
 		}
 		return false
 	}
 }
 
-func (self *Syncer) copyRegularFile(
-	srcName string, stat *os.FileInfo, dstName string, out chan SyncStats) {
+func (self *Syncer) copyRegularFile(srcName string, stat *os.FileInfo, dstName string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() { out <- *stats }()
 
@@ -171,18 +167,18 @@ func (self *Syncer) copyRegularFile(
 
 	infd, err := os.Open(srcName, os.O_RDONLY, 0)
 	if err != nil {
-                fmt.Fprintf(self.ErrorWriter,
-                        "Error opening copy source file %s: %s\n",
-                        srcName, err)
-                stats.ErrorCount++
-                return
+		fmt.Fprintf(self.ErrorWriter,
+			"Error opening copy source file %s: %s\n",
+			srcName, err)
+		stats.ErrorCount++
+		return
 	}
 	defer infd.Close()
 
 	const BUF_SIZE = 1024 * 256
 	buf := make([]byte, BUF_SIZE)
 	bytesRemain := stat.Size
-	for (bytesRemain > 0) {
+	for bytesRemain > 0 {
 		n, err := infd.Read(buf)
 		switch {
 		case n == 0:
@@ -193,7 +189,7 @@ func (self *Syncer) copyRegularFile(
 				srcName, err)
 			return
 		default:
-			outN, err := outfd.Write(buf[0 : n])
+			outN, err := outfd.Write(buf[0:n])
 			if err != nil || outN != n {
 				fmt.Fprintf(self.ErrorWriter, "Error copying file %s in write: %s",
 					srcName, err)
@@ -229,13 +225,12 @@ func (self *Syncer) copyRegularFile(
 	}
 
 	stats.FilesCreated++
-	if (self.Verbose) {
+	if self.Verbose {
 		fmt.Fprintln(self.VerboseWriter, dstName)
 	}
 }
 
-func (self *Syncer) copyDirectory(
-	srcName string, stat *os.FileInfo, dstName string, out chan SyncStats) {
+func (self *Syncer) copyDirectory(srcName string, stat *os.FileInfo, dstName string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() { out <- *stats }()
 
@@ -245,7 +240,7 @@ func (self *Syncer) copyDirectory(
 		return
 	}
 	stats.DirsCreated++
-	if (self.Verbose) {
+	if self.Verbose {
 		fmt.Fprintln(self.VerboseWriter, dstName)
 	}
 
@@ -280,20 +275,19 @@ func lstatAsync(filename string) chan *os.FileInfo {
 // To be run in a goroutine.  Writes its aggregate stats to out.
 //
 // Precondition:  dstName exists.
-func (self *Syncer) checkOrMakeEqual(
-	srcName string, dstName string, out chan SyncStats) {
+func (self *Syncer) checkOrMakeEqual(srcName string, dstName string, out chan SyncStats) {
 	stats := new(SyncStats)
-        defer func() { out <- *stats }()
+	defer func() { out <- *stats }()
 
 	// Kick off async stats
 	srcStatChan := lstatAsync(srcName)
 	dstStatChan := lstatAsync(dstName)
 
-	srcStat := <- srcStatChan
-	dstStat := <- dstStatChan
+	srcStat := <-srcStatChan
+	dstStat := <-dstStatChan
 	if srcStat == nil || dstStat == nil {
 		stats.ErrorCount++
-                return
+		return
 	}
 
 	if srcStat.IsRegular() {
@@ -351,7 +345,7 @@ func (self *Syncer) checkOrMakeEqual(
 func (self *Syncer) Copy(srcName string, dstName string, out chan SyncStats) {
 	srcStat, serr := os.Lstat(srcName)
 	if serr != nil {
-                fmt.Fprintf(self.ErrorWriter, "Can't stat source %s: %v\n",
+		fmt.Fprintf(self.ErrorWriter, "Can't stat source %s: %v\n",
 			srcName, serr)
 		sendError(out)
 		return
@@ -375,7 +369,7 @@ func (self *Syncer) Copy(srcName string, dstName string, out chan SyncStats) {
 			fmt.Fprintf(self.ErrorWriter, "Error making symlink %s: %v\n",
 				dstName, lerr)
 			sendError(out)
-                        return
+			return
 		}
 		stats := new(SyncStats)
 		stats.SymlinksCreated++
@@ -412,7 +406,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 	// Leaf case: if Remove works, we're done.
 	err = os.Remove(filename)
 	if err == nil {
-		if (self.Verbose) {
+		if self.Verbose {
 			fmt.Fprintln(self.VerboseWriter, "x", filename)
 		}
 		if dirstat.IsDirectory() {
@@ -428,7 +422,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 		fmt.Fprintf(self.ErrorWriter, "Not a directory as expected: %s",
 			filename)
 		stats.ErrorCount++
-                return
+		return
 	}
 
 	fd, err := os.Open(filename, os.O_RDONLY, 0)
@@ -436,7 +430,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 		fmt.Fprintf(self.ErrorWriter, "Error opening dir %s: %v",
 			filename, err)
 		stats.ErrorCount++
-                return
+		return
 	}
 
 	names, err := fd.Readdirnames(-1)
@@ -445,7 +439,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 			filename, err)
 		fd.Close()
 		stats.ErrorCount++
-                return
+		return
 	}
 	fd.Close()
 
@@ -464,8 +458,7 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 	}
 }
 
-func (self *Syncer) SyncDirectories(srcDir string, dstDir string,
-	out chan SyncStats) {
+func (self *Syncer) SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() { out <- *stats }()
 
@@ -487,38 +480,43 @@ func (self *Syncer) SyncDirectories(srcDir string, dstDir string,
 		return
 	}
 
-	srcSet := stringSet(srcDirnames)
-	dstSet := stringSet(dstDirnames)
-	inSourceDir := makeMapLookupTest(srcSet)
-	inDestDir := makeMapLookupTest(dstSet)
+	inSourceDir := makeListContainsFunc(srcDirnames)
+	inDestDir := makeListContainsFunc(dstDirnames)
 	notInSourceDir := func(entry interface{}) bool {
 		return !inSourceDir(entry)
 	}
 
 	srcNamesIter := iterable.StringArray(srcDirnames)
 	dstNamesIter := iterable.StringArray(dstDirnames)
-	inDst, notInDst := iterable.Partition(srcNamesIter, inDestDir)
-	toBeDeletedNames := iterable.Filter(dstNamesIter, notInSourceDir)
+	inDest, notInDest := iterable.Partition(srcNamesIter, inDestDir)
 
 	ops := new(outstandingOps)
 
-	for e := range inDst.Iter() {
-		go self.checkOrMakeEqual(fmt.Sprintf("%s/%s", srcDir, e),
-                        fmt.Sprintf("%s/%s", dstDir, e),
-			ops.new())
+	fileInSrc := func(s interface{}) string {
+		str := s.(string)
+		return fmt.Sprintf("%s/%s", srcDir, str)
+	}
+	fileInDest := func(s interface{}) string {
+		str := s.(string)
+		return fmt.Sprintf("%s/%s", dstDir, str)
 	}
 
-	for e := range notInDst.Iter() {
-		go self.Copy(fmt.Sprintf("%s/%s", srcDir, e),
-			fmt.Sprintf("%s/%s", dstDir, e),
-			ops.new())
+	// Files in destination which may already be correct...
+	for e := range inDest.Iter() {
+		go self.checkOrMakeEqual(fileInSrc(e), fileInDest(e), ops.new())
 	}
 
+	// Files which don't exist in destination and need to be
+	// copied over..
+	for e := range notInDest.Iter() {
+		go self.Copy(fileInSrc(e), fileInDest(e), ops.new())
+	}
+
+	// Files in destination which shouldn't exist...
+	toBeDeletedNames := iterable.Filter(dstNamesIter, notInSourceDir)
 	for e := range toBeDeletedNames.Iter() {
-		go self.RemoveAll(fmt.Sprintf("%s/%s", dstDir, e), ops.new())
+		go self.RemoveAll(fileInDest(e), ops.new())
 	}
 
 	ops.wait(stats)
 }
-
-
