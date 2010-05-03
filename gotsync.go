@@ -1,13 +1,16 @@
+// gotsync: Go Tree Sync, a massively parallel filesystem tree syncer
 //
-// Massively parallel filesystem tree syncer.
+// Author: Brad Fitzpatrick <brad@danga.com>
 //
 // Assumes filesystem stats are slow (such as syncing a large tree
-// from local disk to a remote NFS server, where dentries need
-// to be revalidated remotely...)
+// from local disk to a remote NFS server, where dentries need to be
+// re-validated remotely...) and tries to keep all possible operations
+// in flight as possible, trying to get performance gains through
+// parallelism.
 //
-// Copyright 2010 Brad Fitzpatrick
-// brad@danga.com
-//
+// Copyright 2010 Brad Fitzpatrick. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package gotsync
 
