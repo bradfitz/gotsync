@@ -17,6 +17,8 @@
 
 package main
 
+import "http"
+import _ "http/pprof"
 import "flag"
 import "fmt"
 import "os"
@@ -35,7 +37,9 @@ func usage() {
 func main() {
 	flag.Parse()
 	resultChan := make(chan gotsync.SyncStats)
-
+		
+	go http.ListenAndServe(":12345", nil) 
+	
 	syncer := gotsync.New()
 	syncer.Verbose = *verbose
 

@@ -1,9 +1,9 @@
-gotsync: main.8 gotsync.8
-	8l -o gotsync main.8
+gotsync: main.6 gotsync.6
+	6l -o gotsync main.6
 
-gotsync.8: gotsync.go
-	8g -o gotsync.8 gotsync.go
+gotsync.6: gotsync.go
+	6g -o gotsync.6 gotsync.go
 
-main.8: main.go
-	8g -o main.8 main.go
+main.6: main.go
+	6g -o main.6 main.go
 

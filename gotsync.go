@@ -211,11 +211,10 @@ func (self *Syncer) copyRegularFile(srcName string, stat *os.FileInfo, dstName s
 	// TODO: how to do this in a portable way?  Timeval.Sec and
 	// Usec are int64 on amd64.  Currently this only compiles in
 	// 386.
+	os.Chtimes(dstName, stat.Atime_ns, stat.Mtime_ns)
 	var tv []syscall.Timeval = make([]syscall.Timeval, 2)
-	tv[0].Sec = int32(stat.Atime_ns / int64(1000000000))
-	tv[0].Usec = int32((stat.Atime_ns % 1000000000) / 1000)
-	tv[1].Sec = int32(stat.Mtime_ns / int64(1000000000))
-	tv[1].Usec = int32((stat.Mtime_ns % 1000000000) / 1000)
+	tv[0] = syscall.NsecToTimeval(stat.Atime_ns)
+	tv[1] = syscall.NsecToTimeval(stat.Mtime_ns)
 	errno := syscall.Utimes(dstName, tv)
 	if errno != 0 {
 		fmt.Fprintf(self.ErrorWriter, "Error modifying utimes on %s: %v",
@@ -458,6 +457,16 @@ func (self *Syncer) RemoveAll(filename string, out chan SyncStats) {
 	}
 }
 
+func removeItem(items []string, item string) []string {
+	for i, ele := range items {
+		if ele == item {
+			items[i] = items[len(items)-1]
+			return items[0:len(items)-1]
+		}
+	}
+	return items
+}
+
 func (self *Syncer) SyncDirectories(srcDir string, dstDir string, out chan SyncStats) {
 	stats := new(SyncStats)
 	defer func() { out <- *stats }()
@@ -479,6 +488,9 @@ func (self *Syncer) SyncDirectories(srcDir string, dstDir string, out chan SyncS
 	if stats.ErrorCount != 0 {
 		return
 	}
+
+	srcDirnames = removeItem(srcDirnames, ".repo")
+	srcDirnames = removeItem(srcDirnames, ".git")
 
 	inSourceDir := makeListContainsFunc(srcDirnames)
 	inDestDir := makeListContainsFunc(dstDirnames)
