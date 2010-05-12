@@ -61,7 +61,10 @@ func main() {
 	checkOrMakeDestinationDirectory(dstDir, permission)
 
 	go syncer.SyncDirectories(srcDir, dstDir, resultChan)
-	fmt.Print(<-resultChan)
+
+	results := <-resultChan
+	fmt.Print(results)
+	os.Exit(results.ErrorCount)
 }
 
 func checkSourceDirectory(dirName string) int {
