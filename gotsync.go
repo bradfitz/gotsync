@@ -22,6 +22,7 @@ import "syscall"
 
 type Syncer struct {
 	Verbose       bool
+	AndroidMode   bool   // ignore .repo and .git dirs
 	ErrorWriter   io.Writer
 	VerboseWriter io.Writer
 }
@@ -31,7 +32,7 @@ type Syncer struct {
 //
 // Mutate the returned environment to taste.
 func New() *Syncer {
-	return &Syncer{false, os.Stderr, os.Stdout}
+	return &Syncer{false, false, os.Stderr, os.Stdout}
 }
 
 type SyncStats struct {
@@ -209,10 +210,8 @@ func (self *Syncer) copyRegularFile(srcName string, stat *os.FileInfo, dstName s
 		return
 	}
 
-	// TODO: how to do this in a portable way?  Timeval.Sec and
-	// Usec are int64 on amd64.  Currently this only compiles in
-	// 386.
-	os.Chtimes(dstName, stat.Atime_ns, stat.Mtime_ns)
+	// When the Chtimes patch is merged upstream...
+	// err = os.Chtimes(dstName, stat.Atime_ns, stat.Mtime_ns)
 	var tv []syscall.Timeval = make([]syscall.Timeval, 2)
 	tv[0] = syscall.NsecToTimeval(stat.Atime_ns)
 	tv[1] = syscall.NsecToTimeval(stat.Mtime_ns)
@@ -490,8 +489,10 @@ func (self *Syncer) SyncDirectories(srcDir string, dstDir string, out chan SyncS
 		return
 	}
 
-	srcDirnames = removeItem(srcDirnames, ".repo")
-	srcDirnames = removeItem(srcDirnames, ".git")
+	if (self.AndroidMode) {
+		srcDirnames = removeItem(srcDirnames, ".repo")
+		srcDirnames = removeItem(srcDirnames, ".git")
+	}
 
 	inSourceDir := makeListContainsFunc(srcDirnames)
 	inDestDir := makeListContainsFunc(dstDirnames)

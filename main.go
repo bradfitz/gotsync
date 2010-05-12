@@ -25,6 +25,7 @@ import "os"
 import gotsync "./gotsync"
 
 var verbose *bool = flag.Bool("v", false, "verbose")
+var android *bool = flag.Bool("android", false, "Android mode; skip .repo and .git dirs")
 var delete *bool = flag.Bool("delete", false, "delete mode (takes 1 argument)")
 
 func usage() {
@@ -42,6 +43,7 @@ func main() {
 	
 	syncer := gotsync.New()
 	syncer.Verbose = *verbose
+	syncer.AndroidMode = *android
 
 	// Delete mode
 	if (*delete) {
