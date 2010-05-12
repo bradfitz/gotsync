@@ -38,9 +38,10 @@ func usage() {
 func main() {
 	flag.Parse()
 	resultChan := make(chan gotsync.SyncStats)
-		
-	go http.ListenAndServe(":12345", nil) 
-	
+
+        // For profiling...
+	go http.ListenAndServe(":12345", nil)
+
 	syncer := gotsync.New()
 	syncer.Verbose = *verbose
 	syncer.AndroidMode = *android
