@@ -14,7 +14,6 @@
 
 package gotsync
 
-import "container/vector"
 import "exp/iterable"
 import "fmt"
 import "os"
@@ -100,20 +99,22 @@ Deleted:
 }
 
 type outstandingOps struct {
-	v vector.Vector // of chan SyncStats
+	ch chan SyncStats
+	count int
 }
 
 func (ops *outstandingOps) new() chan SyncStats {
-	ch := make(chan SyncStats)
-	ops.v.Push(ch)
-	return ch
+	ops.count++
+	if ops.ch == nil {
+		ops.ch = make(chan SyncStats)
+	}
+	return ops.ch
 }
 
 // Wait for all outstandin operations, summing the total into outStats
 func (ops *outstandingOps) wait(outStats *SyncStats) {
-	for _, value := range ops.v {
-		ch := value.(chan SyncStats)
-		subStats := <-ch
+	for i := 0; i < ops.count; i++ {
+		subStats := <-ops.ch
 		outStats.incrementBy(&subStats)
 	}
 }
